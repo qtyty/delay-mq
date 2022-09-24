@@ -1,13 +1,17 @@
 package main
 
 import (
-	rdbClient "github.com/qtyty/delay-mq/v1/internal/redis"
+	"fmt"
+	"github.com/qtyty/delay-mq/v1/app/v1/queue"
 	"time"
 )
 
 func main() {
-	redisClient := rdbClient.NewRedisClient()
-
-	redisClient.Set("key", "value", time.Minute)
-
+	q := queue.NewQueue("test", func(payload string) {
+		fmt.Println(payload)
+	})
+	err := q.SendDelayJob("job1", "asoul", 10*time.Minute)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
