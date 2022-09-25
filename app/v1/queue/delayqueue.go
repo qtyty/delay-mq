@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	logger "github.com/qtyty/delay-mq/v1/internal/log"
 	rdbClient "github.com/qtyty/delay-mq/v1/internal/redis"
 	"time"
 	"unsafe"
@@ -20,7 +21,11 @@ type Queue struct {
 	FetchInterval time.Duration
 	FetchLimit    int
 
+	Ticker *time.Ticker
+
 	Close chan struct{}
+
+	Job *Job
 }
 
 type Job struct {
@@ -66,6 +71,8 @@ func NewQueue(topic string, callback func(string)) *Queue {
 		FetchLimit:    10,
 
 		Close: make(chan struct{}),
+
+		Job: &Job{},
 	}
 }
 
@@ -105,4 +112,78 @@ func (q *Queue) SendScheduleJob(jobName string, payload string, t time.Time) err
 
 func (q *Queue) SendDelayJob(jobName string, payload string, d time.Duration) error {
 	return q.SendScheduleJob(jobName, payload, time.Now().Add(d))
+}
+
+func (q *Queue) Pending2Ready(script string) (int, error) {
+	ret, err := q.RedisCli.Eval(script, []string{q.PendingKey, q.ReadyKey}, time.Now().Unix(), q.FetchLimit)
+	if err != nil {
+		return 0, err
+	}
+	ans, ok := ret.(int64)
+	if !ok {
+		return 0, fmt.Errorf("illegal result: %#v", ret)
+	}
+	return int(ans), nil
+}
+
+// Execute callback
+func (q *Queue) Execute(jobs []string) {
+	for _, jobId := range jobs {
+		job, err := q.RedisCli.Get(jobId)
+		if err != nil {
+			logger.Logger.Error("get job info from redis error: " + err.Error())
+		}
+
+		jobInfo, err := q.Job.StringToStruct(job)
+		if err != nil {
+			logger.Logger.Error("convert job info to struct: " + err.Error())
+		}
+
+		go func(payload string) {
+			defer func() {
+				if err := recover(); err != nil {
+					logger.Logger.Error("run job error: " + err.(string))
+				}
+			}()
+
+			q.Handler(payload)
+			logger.Logger.Info("run job success:" + payload)
+
+		}(jobInfo.Payload)
+	}
+}
+
+func (q *Queue) Run() {
+	num, err := q.Pending2Ready(Pending2ReadyScript)
+	if err != nil {
+		logger.Logger.Error("run redis script error: " + err.Error())
+	}
+	if num == 0 {
+		return
+	}
+
+	jobs, err := q.RedisCli.RPopCount(q.ReadyKey, num)
+	if err != nil {
+		logger.Logger.Error("get job from redis list error: " + err.Error())
+	}
+
+	q.Execute(jobs)
+}
+
+func (q *Queue) Start() {
+	q.Ticker = time.NewTicker(q.FetchInterval)
+	defer q.Ticker.Stop()
+	logger.Logger.Info("queue start")
+	for {
+		select {
+		case <-q.Ticker.C:
+			go q.Run()
+		case <-q.Close:
+			return
+		}
+	}
+}
+
+func (q *Queue) Stop() {
+	q.Close <- struct{}{}
 }

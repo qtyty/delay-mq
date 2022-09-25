@@ -44,6 +44,10 @@ func (rdb *RedisClient) RPop(key string) (string, error) {
 	return rdb.rdb.RPop(rdb.ctx, key).Result()
 }
 
+func (rdb *RedisClient) RPopCount(key string, count int) ([]string, error) {
+	return rdb.rdb.RPopCount(rdb.ctx, key, count).Result()
+}
+
 //ZSet
 
 func (rdb *RedisClient) ZCard(key string) (int64, error) {
@@ -59,6 +63,6 @@ func (rdb *RedisClient) ZAdd(key string, value string, score int64) error {
 
 // lua script
 
-func (rdb *RedisClient) RunScript(script string, keys []string, args ...any) (any, error) {
+func (rdb *RedisClient) Eval(script string, keys []string, args ...any) (any, error) {
 	return rdb.rdb.Eval(rdb.ctx, script, keys, args).Result()
 }

@@ -10,8 +10,13 @@ func main() {
 	q := queue.NewQueue("test", func(payload string) {
 		fmt.Println(payload)
 	})
-	err := q.SendDelayJob("job1", "asoul", 10*time.Minute)
-	if err != nil {
-		fmt.Println(err)
+
+	for i := 0; i < 100; i++ {
+		err := q.SendDelayJob("job1", "asoul"+string([]byte{byte(i)}), 10*time.Minute)
+		if err != nil {
+			fmt.Println(err)
+		}
 	}
+
+	q.Start()
 }
